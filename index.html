@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Mukhtar Khan — Memory Layout Engineer</title>
+<meta name="description" content="Mukhtar Khan, Memory Layout Engineer at Broadcom. SRAM design, physical layout, DRC/LVS.">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+:root{
+  --bg:#0A0D12;--surface:#121821;--surface2:#1A222D;--line:#26313D;--line-soft:#1C242E;
+  --text:#EDEFF2;--muted:#8A94A3;--faint:#5C6675;--copper:#E3A857;--copper-dim:#C08D45;--teal:#5FC9BA;--teal-dim:#4AA79B;
+  --r:7px;--maxw:1120px;
+}
+*{box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;line-height:1.6;overflow-x:hidden;cursor:default;}
+h1,h2,h3{font-family:'Space Grotesk',sans-serif;font-weight:600;margin:0;letter-spacing:-.01em;}
+.mono{font-family:'IBM Plex Mono',monospace;}
+a{color:inherit;text-decoration:none;}
+::selection{background:var(--copper);color:#0B0F14;}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 32px;position:relative;}
+@media(max-width:640px){.wrap{padding:0 20px;}}
+
+/* ---- boot sequence ---- */
+#boot{position:fixed;inset:0;z-index:999;background:#06080B;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .6s ease, visibility .6s ease;}
+#boot.hide{opacity:0;visibility:hidden;}
+#boot .boot-lines{font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--teal);min-height:140px;text-align:left;width:280px;}
+#boot .boot-lines div{opacity:0;animation:bl .4s forwards;white-space:nowrap;}
+#boot .boot-lines div:nth-child(1){animation-delay:.1s;}
+#boot .boot-lines div:nth-child(2){animation-delay:.55s;}
+#boot .boot-lines div:nth-child(3){animation-delay:1s;}
+#boot .boot-lines div:nth-child(4){animation-delay:1.45s;color:var(--copper);}
+@keyframes bl{to{opacity:1;}}
+#boot .bar{width:280px;height:2px;background:var(--line);margin-top:22px;overflow:hidden;border-radius:2px;}
+#boot .bar i{display:block;height:100%;width:0;background:var(--copper);animation:fillbar 2.1s cubic-bezier(.3,.6,.3,1) forwards;}
+@keyframes fillbar{to{width:100%;}}
+#boot .skip{position:absolute;bottom:26px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--faint);cursor:pointer;}
+
+/* ---- cursor glow ---- */
+#glow{position:fixed;width:340px;height:340px;border-radius:50%;pointer-events:none;z-index:2;
+  background:radial-gradient(circle, rgba(227,168,87,0.07) 0%, rgba(227,168,87,0) 70%);
+  transform:translate(-50%,-50%);transition:opacity .3s;left:-500px;top:-500px;}
+@media(max-width:820px){#glow{display:none;}}
+
+/* ---- side rail ---- */
+#rail{position:fixed;right:26px;top:50%;transform:translateY(-50%);z-index:40;display:flex;flex-direction:column;gap:14px;}
+#rail a{width:8px;height:8px;border-radius:50%;background:var(--line);display:block;position:relative;transition:background .25s;}
+#rail a.active{background:var(--copper);}
+#rail a span{position:absolute;right:16px;top:50%;transform:translateY(-50%);font-family:'IBM Plex Mono',monospace;font-size:11px;
+  color:var(--muted);white-space:nowrap;opacity:0;transition:opacity .2s;pointer-events:none;}
+#rail a:hover span{opacity:1;}
+@media(max-width:820px){#rail{display:none;}}
+
+.reveal{opacity:0;transform:translateY(22px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1);}
+.reveal.in{opacity:1;transform:translateY(0);}
+
+/* ---- nav ---- */
+header{position:sticky;top:0;z-index:50;background:rgba(10,13,18,.85);backdrop-filter:blur(10px);border-bottom:1px solid var(--line-soft);}
+.nav{display:flex;align-items:center;justify-content:space-between;height:68px;}
+.brand{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:17px;display:flex;align-items:center;gap:9px;}
+.brand-mark{width:9px;height:9px;background:var(--copper);border-radius:2px;}
+.nav-links{display:flex;gap:2px;list-style:none;margin:0;padding:0;}
+.nav-links a{position:relative;display:block;padding:9px 15px;font-size:14px;color:var(--muted);transition:color .18s;}
+.nav-links a::after{content:'';position:absolute;left:15px;right:15px;bottom:4px;height:2px;background:var(--copper);transform:scaleX(0);transition:transform .25s;}
+.nav-links a:hover{color:var(--text);}
+.nav-links a.active{color:var(--copper);}
+.nav-links a.active::after{transform:scaleX(1);}
+.nav-cta{font-size:13.5px;padding:8px 16px;border:1px solid var(--line);border-radius:5px;transition:.18s;}
+.nav-cta:hover{border-color:var(--copper-dim);background:var(--surface);transform:translateY(-1px);}
+.menu-btn{display:none;background:none;border:none;color:var(--text);font-size:22px;cursor:pointer;}
+@media(max-width:820px){
+  .nav-links{position:fixed;top:68px;left:0;right:0;background:var(--bg);border-bottom:1px solid var(--line-soft);flex-direction:column;padding:8px 20px 16px;display:none;}
+  .nav-links.open{display:flex;} .nav-links a{padding:11px 6px;} .nav-cta{display:none;} .menu-btn{display:block;}
+}
+
+/* ---- hero w/ 3d canvas ---- */
+.hero{position:relative;overflow:hidden;min-height:92vh;display:flex;align-items:center;border-bottom:1px solid var(--line-soft);}
+#chipCanvas{position:absolute;inset:0;width:100%;height:100%;}
+.hero .wrap{display:grid;grid-template-columns:1fr;position:relative;z-index:1;pointer-events:none;}
+.hero-inner{max-width:620px;pointer-events:auto;}
+.eyebrow{display:inline-flex;align-items:center;gap:7px;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--teal);
+  background:rgba(95,201,186,.09);border:1px solid rgba(95,201,186,.25);padding:5px 11px;border-radius:5px;margin-bottom:22px;}
+.eyebrow::before{content:'';width:6px;height:6px;background:var(--teal);border-radius:50%;animation:blink 2s infinite;}
+@keyframes blink{50%{opacity:.3;}}
+.hero h1{font-size:50px;line-height:1.1;margin-bottom:18px;text-shadow:0 2px 40px rgba(10,13,18,.9);}
+@media(max-width:560px){.hero h1{font-size:33px;}}
+.hero .role{color:var(--copper);}
+.hero-sub{font-size:17px;color:var(--muted);margin-bottom:34px;text-shadow:0 2px 20px rgba(10,13,18,.9);}
+.hero-actions{display:flex;gap:12px;flex-wrap:wrap;}
+.btn{font-size:14.5px;font-weight:500;padding:12px 22px;border-radius:6px;cursor:pointer;transition:.16s;display:inline-block;}
+.btn-primary{background:var(--copper);color:#14100A;border:1px solid var(--copper);}
+.btn-primary:hover{background:#EEB868;transform:translateY(-2px);box-shadow:0 8px 22px -8px rgba(227,168,87,.5);}
+.btn-ghost{background:rgba(18,24,33,.6);color:var(--text);border:1px solid var(--line);backdrop-filter:blur(4px);}
+.btn-ghost:hover{border-color:var(--teal-dim);transform:translateY(-2px);}
+.scroll-cue{position:absolute;bottom:28px;left:50%;transform:translateX(-50%);font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--faint);
+  display:flex;flex-direction:column;align-items:center;gap:8px;z-index:1;}
+.scroll-cue i{width:1px;height:26px;background:linear-gradient(var(--teal),transparent);animation:cue 1.8s ease-in-out infinite;}
+@keyframes cue{0%,100%{opacity:.3;}50%{opacity:1;}}
+
+/* ---- sections (shared) ---- */
+section{padding:84px 0;border-bottom:1px solid var(--line-soft);}
+.section-head{margin-bottom:44px;max-width:60ch;}
+.section-tag{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--copper);margin-bottom:10px;display:block;}
+.section-head h2{font-size:30px;}
+.section-head p{color:var(--muted);margin-top:12px;font-size:15px;}
+
+.about-grid{display:grid;grid-template-columns:1.3fr .7fr;gap:56px;}
+@media(max-width:820px){.about-grid{grid-template-columns:1fr;}}
+.about-text p{color:var(--muted);font-size:16px;max-width:58ch;margin:0;}
+.stat-panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:26px;transition:.2s;}
+.stat-panel:hover{border-color:var(--teal-dim);transform:translateY(-3px);}
+.stat-row{display:flex;justify-content:space-between;align-items:baseline;padding:13px 0;border-bottom:1px solid var(--line-soft);}
+.stat-row:last-child{border-bottom:none;}
+.stat-lbl{font-size:13px;color:var(--muted);}
+
+.exp-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:30px 32px;display:flex;gap:24px;align-items:flex-start;transition:.2s;}
+.exp-card:hover{border-color:var(--copper-dim);transform:translateY(-3px);}
+@media(max-width:560px){.exp-card{flex-direction:column;padding:24px;}}
+.exp-mark{width:38px;height:38px;border-radius:6px;background:rgba(227,168,87,.1);border:1px solid rgba(227,168,87,.3);flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+.exp-mark span{width:11px;height:11px;background:var(--copper);border-radius:2px;animation:blink 2.4s infinite;}
+.exp-role{font-family:'Space Grotesk',sans-serif;font-size:19px;margin-bottom:3px;}
+.exp-org{color:var(--teal);font-size:14.5px;margin-bottom:2px;}
+.exp-date{font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--faint);margin-bottom:14px;display:block;}
+.exp-card p{color:var(--muted);font-size:14.5px;max-width:60ch;margin:0;}
+
+.proj-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:24px;}
+.proj-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:30px;display:flex;flex-direction:column;gap:14px;transition:.2s;}
+.proj-card:hover{border-color:var(--teal-dim);transform:translateY(-5px);background:var(--surface2);box-shadow:0 14px 30px -16px rgba(0,0,0,.6);}
+.proj-tag{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--teal);border:1px solid rgba(95,201,186,.3);background:rgba(95,201,186,.07);padding:4px 9px;border-radius:4px;width:fit-content;}
+.proj-card h3{font-size:19px;line-height:1.3;}
+.proj-card p.desc{color:var(--muted);font-size:14px;margin:0;}
+.chip-row{display:flex;flex-wrap:wrap;gap:7px;}
+.chip{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--muted);background:var(--surface2);border:1px solid var(--line);padding:4px 9px;border-radius:4px;}
+.proj-outcome{border-top:1px solid var(--line-soft);padding-top:12px;}
+.proj-outcome span{color:var(--copper);font-family:'IBM Plex Mono',monospace;font-size:10.5px;display:block;margin-bottom:5px;}
+.proj-outcome p{color:var(--muted);font-size:13.5px;margin:0;}
+
+.skills-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;}
+@media(max-width:700px){.skills-grid{grid-template-columns:1fr;}}
+.skill-group{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:24px 26px;transition:.2s;}
+.skill-group:hover{border-color:var(--teal-dim);transform:translateY(-3px);}
+.skill-group h3{font-size:15px;color:var(--teal);margin-bottom:15px;font-family:'IBM Plex Mono',monospace;font-weight:500;}
+.skill-chips{display:flex;flex-wrap:wrap;gap:8px;}
+.skill-chip{font-size:13.5px;background:var(--surface2);border:1px solid var(--line);padding:6px 11px;border-radius:5px;transition:.15s;}
+.skill-chip:hover{border-color:var(--copper-dim);transform:translateY(-2px);}
+
+.pub-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:30px 32px;transition:.2s;}
+.pub-card:hover{border-color:var(--teal-dim);transform:translateY(-3px);}
+.pub-top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:14px;}
+.pub-card h3{font-size:19px;line-height:1.35;max-width:52ch;}
+.pub-sub{color:var(--muted);font-size:14px;margin:6px 0 0;}
+.pub-authors{font-size:14px;color:var(--muted);margin:14px 0 6px;}
+.pub-authors b{color:var(--text);font-weight:600;}
+.pub-meta{display:flex;flex-wrap:wrap;gap:18px;margin-top:16px;padding-top:16px;border-top:1px solid var(--line-soft);}
+.pub-meta div{display:flex;flex-direction:column;gap:3px;}
+.pub-meta span{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--faint);}
+.pub-meta a,.pub-meta p{font-size:13.5px;margin:0;}
+.pub-meta a{color:var(--teal);}
+.pub-meta a:hover{color:var(--copper);}
+.edu-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:32px;transition:.2s;}
+.edu-card:hover{border-color:var(--copper-dim);transform:translateY(-3px);}
+.edu-top{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap;margin-bottom:18px;}
+.edu-top h3{font-size:20px;margin-bottom:5px;}
+.edu-org{color:var(--muted);font-size:14.5px;}
+.edu-year{font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--copper);border:1px solid rgba(227,168,87,.3);background:rgba(227,168,87,.08);padding:5px 11px;border-radius:5px;white-space:nowrap;}
+.edu-coursework{border-top:1px solid var(--line-soft);padding-top:18px;}
+.edu-coursework span{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--faint);display:block;margin-bottom:10px;}
+
+.contact-wrap{display:flex;justify-content:space-between;align-items:flex-end;gap:32px;flex-wrap:wrap;}
+.contact-wrap h2{font-size:34px;max-width:14ch;margin-bottom:14px;}
+.contact-wrap p{color:var(--muted);max-width:40ch;font-size:15px;}
+.contact-links{display:flex;flex-direction:column;gap:4px;}
+.contact-links a{display:flex;align-items:center;gap:10px;font-size:15.5px;padding:11px 0;border-bottom:1px solid var(--line-soft);transition:.18s;}
+.contact-links a:hover{color:var(--copper);gap:14px;}
+.contact-links a .k{color:var(--faint);font-family:'IBM Plex Mono',monospace;font-size:11.5px;width:64px;flex-shrink:0;}
+footer{padding:28px 0;}
+.footer-row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;}
+.footer-row p{margin:0;font-size:13px;color:var(--faint);}
+@media (prefers-reduced-motion: reduce){.reveal{opacity:1;transform:none;}}
+</style>
+</head>
+<body>
+
+<div id="boot">
+  <div class="boot-lines mono">
+    <div>&gt; INITIALIZING SYSTEM...</div>
+    <div>&gt; LOADING LAYOUT ENGINE...</div>
+    <div>&gt; CHIP POWER-ON SEQUENCE OK</div>
+    <div>&gt; MUKHTAR KHAN — MEMORY LAYOUT ENGINEER</div>
+  </div>
+  <div class="bar"><i></i></div>
+  <div class="skip" id="skipBoot">click to skip</div>
+</div>
+<div id="glow"></div>
+
+<nav id="rail">
+  <a href="#home" data-s="home"><span>Home</span></a>
+  <a href="#about" data-s="about"><span>About</span></a>
+  <a href="#experience" data-s="experience"><span>Experience</span></a>
+  <a href="#projects" data-s="projects"><span>Projects</span></a>
+  <a href="#skills" data-s="skills"><span>Skills</span></a>
+  <a href="#publications" data-s="publications"><span>Publications</span></a>
+  <a href="#education" data-s="education"><span>Education</span></a>
+  <a href="#contact" data-s="contact"><span>Contact</span></a>
+</nav>
+
+<header>
+  <div class="wrap nav">
+    <div class="brand"><span class="brand-mark"></span>Mukhtar Khan</div>
+    <button class="menu-btn" id="menuBtn" aria-label="Toggle menu">&#9776;</button>
+    <ul class="nav-links" id="navLinks">
+      <li><a href="#about">About</a></li><li><a href="#experience">Experience</a></li>
+      <li><a href="#projects">Projects</a></li><li><a href="#skills">Skills</a></li>
+      <li><a href="#publications">Publications</a></li>
+      <li><a href="#education">Education</a></li><li><a href="#contact">Contact</a></li>
+    </ul>
+    <a class="nav-cta" href="#contact">Get in touch</a>
+  </div>
+</header>
+
+<section class="hero" id="home">
+  <canvas id="chipCanvas"></canvas>
+  <div class="wrap">
+    <div class="hero-inner">
+      <span class="eyebrow">Open to interesting work</span>
+      <h1>Mukhtar Khan<br><span class="role">Memory Layout Engineer</span></h1>
+      <p class="hero-sub">Electrical Engineer designing SRAM memory layouts at Broadcom — from bitcell to full array.</p>
+      <div class="hero-actions">
+        <a href="#contact" class="btn btn-primary">Get in touch</a>
+        <a href="#projects" class="btn btn-ghost">View projects</a>
+      </div>
+    </div>
+  </div>
+  <div class="scroll-cue">SCROLL<i></i></div>
+</section>
+
+<section id="about"><div class="wrap about-grid">
+  <div class="about-text reveal">
+    <span class="section-tag">// ABOUT</span>
+    <h2 style="margin-bottom:20px;">Turning schematics into silicon-ready layout.</h2>
+    <p>I design and verify physical layouts for SRAM memory at Broadcom, and I've built SRAM structures from scratch — bitcell to full array — to understand the reasoning behind the layout, not just the drawing.</p>
+  </div>
+  <div class="stat-panel reveal">
+    <div class="stat-row"><span class="stat-lbl">Role</span><span class="mono" style="color:var(--copper);">Memory Layout Engineer</span></div>
+    <div class="stat-row"><span class="stat-lbl">Company</span><span class="mono" style="color:var(--copper);">Broadcom</span></div>
+    <div class="stat-row"><span class="stat-lbl">Background</span><span class="mono" style="color:var(--copper);">B.Tech, EE</span></div>
+    <div class="stat-row"><span class="stat-lbl">Focus</span><span class="mono" style="color:var(--copper);">SRAM / Physical Design</span></div>
+  </div>
+</div></section>
+
+<section id="experience"><div class="wrap">
+  <div class="section-head reveal"><span class="section-tag">// EXPERIENCE</span><h2>Where I'm working</h2></div>
+  <div class="exp-card reveal">
+    <div class="exp-mark"><span></span></div>
+    <div>
+      <div class="exp-role">Memory Layout Engineer</div>
+      <div class="exp-org">Broadcom · Full-time</div>
+      <span class="exp-date mono">July 2026 — Present · Bengaluru, Karnataka</span>
+      <p>Physical layout and verification (DRC/LVS/ERC) for memory circuits — floorplanning through routing to silicon-ready signoff.</p>
+    </div>
+  </div>
+</div></section>
+
+<section id="projects"><div class="wrap">
+  <div class="section-head reveal"><span class="section-tag">// TECHNICAL PROJECTS</span><h2>From circuit theory to physical silicon</h2>
+    <p>SRAM layout work, plus earlier power-electronics work from my B.Tech.</p></div>
+  <div class="proj-grid">
+    <div class="proj-card reveal">
+      <span class="proj-tag">BLOCK DESIGN</span>
+      <h3>SRAM Core Cell &amp; Peripheral Circuit Layout</h3>
+      <p class="desc">Physical layout of the 6T bitcell, row decoder, and predecoder — compact placement, symmetry, and DRC/LVS-clean routing.</p>
+      <div class="chip-row"><span class="chip">6T Bitcell</span><span class="chip">Row Decoder</span><span class="chip">Predecoder</span><span class="chip">DRC</span><span class="chip">LVS</span></div>
+      <div class="proj-outcome"><span>OUTCOME</span><p>Foundation in bitcell behavior, device matching, and decoder-to-layout translation.</p></div>
+    </div>
+    <div class="proj-card reveal">
+      <span class="proj-tag">ARRAY INTEGRATION</span>
+      <h3>SRAM Memory Array — 1024 × 256 × 4</h3>
+      <p class="desc">Integrated bitcell, decoder, predecoder, and periphery into a complete 1024×256×4 SRAM array.</p>
+      <div class="chip-row"><span class="chip">SRAM Architecture</span><span class="chip">Memory Array</span><span class="chip">MUX</span><span class="chip">Hierarchical Layout</span></div>
+      <div class="proj-outcome"><span>OUTCOME</span><p>Hands-on view of how individual blocks scale into a full memory hierarchy.</p></div>
+    </div>
+    <div class="proj-card reveal">
+      <span class="proj-tag" style="color:#E3A857;border-color:rgba(227,168,87,.3);background:rgba(227,168,87,.07);">B.TECH PROJECT</span>
+      <h3>Multilevel Inverter</h3>
+      <p class="desc">Studied DC–AC conversion via a multilevel inverter topology — switching operation, output waveform, and harmonics.</p>
+      <div class="chip-row"><span class="chip">Power Electronics</span><span class="chip">DC–AC Conversion</span><span class="chip">MATLAB/Simulink</span></div>
+      <div class="proj-outcome"><span>OUTCOME</span><p>Practical grasp of NLC switching and harmonic reduction through simulation.</p></div>
+    </div>
+  </div>
+</div></section>
+
+<section id="skills"><div class="wrap">
+  <div class="section-head reveal"><span class="section-tag">// SKILLS</span><h2>What I work with</h2></div>
+  <div class="skills-grid">
+    <div class="skill-group reveal"><h3>VLSI &amp; Layout</h3><div class="skill-chips">
+      <span class="skill-chip">Custom IC Layout</span><span class="skill-chip">CMOS Layout</span><span class="skill-chip">SRAM Layout</span>
+      <span class="skill-chip">Memory Array Layout</span><span class="skill-chip">Layout Optimization</span><span class="skill-chip">Device Matching</span>
+      <span class="skill-chip">Common-Centroid Layout</span><span class="skill-chip">Routing</span></div></div>
+    <div class="skill-group reveal"><h3>Physical Verification</h3><div class="skill-chips">
+      <span class="skill-chip">DRC</span><span class="skill-chip">LVS</span><span class="skill-chip">ERC</span><span class="skill-chip">PEX</span><span class="skill-chip">PDK &amp; Design Rules</span></div></div>
+    <div class="skill-group reveal"><h3>Semiconductor Knowledge</h3><div class="skill-chips">
+      <span class="skill-chip">CMOS Technology</span><span class="skill-chip">NMOS / PMOS</span><span class="skill-chip">SRAM Read/Write</span>
+      <span class="skill-chip">FinFET Concepts</span><span class="skill-chip">Metal / Poly Routing</span></div></div>
+    <div class="skill-group reveal"><h3>EDA Tools</h3><div class="skill-chips">
+      <span class="skill-chip">Cadence Virtuoso</span><span class="skill-chip">Calibre</span><span class="skill-chip">Assura</span><span class="skill-chip">LTspice</span></div></div>
+  </div>
+</div></section>
+
+<section id="publications"><div class="wrap">
+  <div class="section-head reveal"><span class="section-tag">// PUBLICATIONS</span><h2>Research &amp; writing</h2></div>
+  <div class="pub-card reveal">
+    <span class="proj-tag" style="color:#5FC9BA;margin-bottom:14px;">INDUSTRY 4.0 · INTERDISCIPLINARY</span>
+    <div class="pub-top">
+      <div>
+        <h3>Evaluating Internet-of-Things–Aided Simulation Accuracy in Cyber-Physical Manufacturing</h3>
+        <p class="pub-sub">A Comparative Study of Static and Real-Time Models — Chapter 25 in <em>Smart and Sustainable Manufacturing</em></p>
+      </div>
+    </div>
+    <p class="pub-authors">S. Meesum Raza Zaidi, Mohd Ahzam Khan, Yashra Malik, <b>Mukhtar Khan</b>, Mohammed Ali, Faisal Talib</p>
+    <div class="pub-meta">
+      <div><span>PUBLISHER</span><p>Wiley</p></div>
+      <div><span>EDITORS</span><p>Sandip Kunar, Gurudas Mandal, Preeti Singh Bahadur, S. Rama Sree, M. Sreenivasa Reddy</p></div>
+      <div><span>PUBLISHED</span><p>09 September 2026</p></div>
+      <div><span>DOI</span><a href="https://doi.org/10.1002/9781394409334.ch25" target="_blank" rel="noopener">10.1002/9781394409334.ch25 &#8594;</a></div>
+    </div>
+  </div>
+</div></section>
+
+<section id="education"><div class="wrap">
+  <div class="section-head reveal"><span class="section-tag">// EDUCATION</span><h2>Academic background</h2></div>
+  <div class="edu-card reveal">
+    <div class="edu-top"><div><h3>Bachelor of Technology — Electrical Engineering</h3><div class="edu-org">Aligarh Muslim University, Aligarh</div></div>
+      <span class="edu-year mono">Class of 2026</span></div>
+    <div class="edu-coursework"><span>RELEVANT COURSEWORK</span><div class="chip-row">
+      <span class="chip">Digital Electronics</span><span class="chip">Analog Electronics</span><span class="chip">Semiconductor Devices</span>
+      <span class="chip">VLSI Design</span><span class="chip">Microelectronics</span><span class="chip">Signals &amp; Systems</span></div></div>
+  </div>
+</div></section>
+
+<section id="contact" style="border-bottom:none;"><div class="wrap contact-wrap">
+  <div class="reveal"><span class="section-tag">// CONTACT</span><h2>Let's talk memory design.</h2>
+    <p>Open to conversations about VLSI, memory design, or new opportunities.</p></div>
+  <div class="contact-links reveal">
+    <a href="mailto:mukhtarkha003@gmail.com"><span class="k mono">EMAIL</span> mukhtarkha003@gmail.com</a>
+    <a href="https://www.linkedin.com/in/mukhtarkhan003/" target="_blank" rel="noopener"><span class="k mono">LINKEDIN</span> linkedin.com/in/mukhtarkhan003</a>
+    <a href="https://github.com/Mukhtarkhan0" target="_blank" rel="noopener"><span class="k mono">GITHUB</span> github.com/Mukhtarkhan0</a>
+    <a href="#"><span class="k mono">LOCATION</span> Bengaluru, Karnataka, India</a>
+  </div>
+</div></section>
+
+<footer><div class="wrap footer-row">
+  <p>&copy; 2026 Mukhtar Khan. All rights reserved.</p>
+  <p class="mono">LAYOUT ENGINEER · SRAM · CMOS</p>
+</div></footer>
+
+<script>
+// boot sequence
+const boot=document.getElementById('boot');
+function endBoot(){boot.classList.add('hide');}
+setTimeout(endBoot,2300);
+document.getElementById('skipBoot').addEventListener('click',endBoot);
+boot.addEventListener('click',endBoot);
+
+// cursor glow
+const glow=document.getElementById('glow');
+window.addEventListener('mousemove',e=>{glow.style.left=e.clientX+'px';glow.style.top=e.clientY+'px';});
+
+// mobile menu
+const menuBtn=document.getElementById('menuBtn'),navLinks=document.getElementById('navLinks');
+menuBtn.addEventListener('click',()=>navLinks.classList.toggle('open'));
+navLinks.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>navLinks.classList.remove('open')));
+
+// active section (nav + rail)
+const sections=document.querySelectorAll('section[id]');
+const navA=document.querySelectorAll('.nav-links a');
+const railA=document.querySelectorAll('#rail a');
+const navObs=new IntersectionObserver(entries=>{
+  entries.forEach(entry=>{
+    if(entry.isIntersecting){
+      const id='#'+entry.target.id;
+      navA.forEach(l=>l.classList.toggle('active',l.getAttribute('href')===id));
+      railA.forEach(l=>l.classList.toggle('active',l.getAttribute('href')===id));
+    }
+  });
+},{rootMargin:'-40% 0px -50% 0px'});
+sections.forEach(s=>navObs.observe(s));
+
+// scroll reveal
+const revealEls=document.querySelectorAll('.reveal');
+const revealObs=new IntersectionObserver((entries)=>{
+  entries.forEach((entry,i)=>{
+    if(entry.isIntersecting){setTimeout(()=>entry.target.classList.add('in'),i*40);revealObs.unobserve(entry.target);}
+  });
+},{threshold:.15,rootMargin:'0px 0px -60px 0px'});
+revealEls.forEach(el=>revealObs.observe(el));
+
+// ---- three.js hero chip ----
+(function(){
+  const canvas=document.getElementById('chipCanvas');
+  const hero=document.querySelector('.hero');
+  const renderer=new THREE.WebGLRenderer({canvas:canvas,alpha:true,antialias:true});
+  const scene=new THREE.Scene();
+  const camera=new THREE.PerspectiveCamera(45,hero.clientWidth/hero.clientHeight,0.1,100);
+  camera.position.set(0,1.1,6.2);
+
+  function resize(){
+    const w=hero.clientWidth,h=hero.clientHeight;
+    renderer.setSize(w,h); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+    camera.aspect=w/h; camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize',resize);
+
+  // die-pattern texture (reuses the copper/teal grid language of the rest of the site)
+  const tc=document.createElement('canvas'); tc.width=512; tc.height=512;
+  const tx=tc.getContext('2d');
+  tx.fillStyle='#131922'; tx.fillRect(0,0,512,512);
+  tx.strokeStyle='rgba(95,201,186,0.35)'; tx.lineWidth=1;
+  for(let i=0;i<=16;i++){tx.beginPath();tx.moveTo(i*32,0);tx.lineTo(i*32,512);tx.stroke();
+    tx.beginPath();tx.moveTo(0,i*32);tx.lineTo(512,i*32);tx.stroke();}
+  for(let i=0;i<40;i++){
+    tx.fillStyle = Math.random()>0.5 ? 'rgba(227,168,87,0.55)' : 'rgba(95,201,186,0.45)';
+    const gx=Math.floor(Math.random()*15)*32+4, gy=Math.floor(Math.random()*15)*32+4;
+    tx.fillRect(gx,gy,24,24);
+  }
+  const dieTex=new THREE.CanvasTexture(tc);
+
+  const group=new THREE.Group();
+  const bodyGeo=new THREE.BoxGeometry(3.2,0.3,3.2);
+  const bodyMat=new THREE.MeshStandardMaterial({color:0x161D27,metalness:0.6,roughness:0.4});
+  const topMat=new THREE.MeshStandardMaterial({map:dieTex,metalness:0.3,roughness:0.6,emissive:0x1a2530,emissiveIntensity:0.3});
+  const mats=[bodyMat,bodyMat,topMat,bodyMat,bodyMat,bodyMat];
+  const chip=new THREE.Mesh(bodyGeo,mats);
+  group.add(chip);
+
+  // pin rows
+  const pinMat=new THREE.MeshStandardMaterial({color:0xE3A857,metalness:0.8,roughness:0.3});
+  for(let s=0;s<2;s++){
+    for(let i=0;i<10;i++){
+      const pin=new THREE.Mesh(new THREE.BoxGeometry(0.1,0.06,0.22),pinMat);
+      const x=-1.35+i*0.3;
+      pin.position.set(x, -0.02, s===0?1.72:-1.72);
+      group.add(pin);
+    }
+  }
+  group.rotation.x=0.42;
+  scene.add(group);
+
+  scene.add(new THREE.AmbientLight(0x8899aa,0.7));
+  const key=new THREE.DirectionalLight(0xffffff,1.1); key.position.set(3,4,2); scene.add(key);
+  const rim=new THREE.PointLight(0x5FC9BA,1.4,10); rim.position.set(-3,1,-2); scene.add(rim);
+  const rim2=new THREE.PointLight(0xE3A857,1.0,10); rim2.position.set(2,-1,3); scene.add(rim2);
+
+  let targetX=0.42, targetY=0, mouseActive=false;
+  hero.addEventListener('mousemove',(e)=>{
+    const r=hero.getBoundingClientRect();
+    const nx=(e.clientX-r.left)/r.width-0.5, ny=(e.clientY-r.top)/r.height-0.5;
+    targetY = nx*0.9; targetX = 0.42 + ny*0.35; mouseActive=true;
+  });
+  hero.addEventListener('mouseleave',()=>{mouseActive=false;});
+
+  let t=0;
+  function animate(){
+    requestAnimationFrame(animate);
+    t+=0.01;
+    group.rotation.y += ((mouseActive?targetY:Math.sin(t*0.3)*0.5)-group.rotation.y)*0.04;
+    group.rotation.x += (targetX-group.rotation.x)*0.04;
+    group.position.y = Math.sin(t*0.6)*0.08;
+    renderer.render(scene,camera);
+  }
+  resize(); animate();
+})();
+</script>
+</body>
+</html>
